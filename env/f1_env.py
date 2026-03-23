@@ -31,6 +31,11 @@ class F1Env:
         self.last_progress = 0.0
         self.crossed_halfway = False
 
+        self.lap_count = 0
+        self.lap_start_step = 0
+        self.fastest_lap_time = None
+        self.last_lap_time = None
+
     @classmethod
     def from_config(cls, config):
         return cls(
@@ -56,6 +61,9 @@ class F1Env:
         self.off_track_count = 0
         self.last_progress = 0.0
         self.crossed_halfway = False
+
+        self.lap_count = 0
+        self.lap_start_step = 0
         return self._get_obs()
 
     def step(self, action):
@@ -107,9 +115,24 @@ class F1Env:
 
         # Lap complete: crossed halfway and back near start
         if self.crossed_halfway and progress < 0.1 and self.last_progress > 0.9:
-            done = True
             reward += self.lap_bonus
             info["lap_complete"] = True
+            self.crossed_halfway = False
+            
+            # Lap time calculation
+            lap_time = (self.steps - self.lap_start_step) * self.car.dt
+            self.last_lap_time = lap_time
+            if self.fastest_lap_time is None or lap_time < self.fastest_lap_time:
+                self.fastest_lap_time = lap_time
+            
+            self.lap_start_step = self.steps
+            self.lap_count += 1
+            print(f"LAP {self.lap_count} COMPLETED: {lap_time:.2f}s (Fastest: {self.fastest_lap_time:.2f}s)")
+
+        info["current_lap_time"] = (self.steps - self.lap_start_step) * self.car.dt
+        info["last_lap_time"] = self.last_lap_time
+        info["fastest_lap_time"] = self.fastest_lap_time
+        info["lap_count"] = self.lap_count
 
         # Off track too long
         if self.off_track_count >= self.off_track_tolerance:

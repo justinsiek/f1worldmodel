@@ -307,6 +307,28 @@ class Visualizer:
             prog = info["progress"] * 100
             self.screen.blit(
                 self.font.render(f"Lap Prog:{prog:5.1f}%", True, self.HUD_TEXT), (x, y))
+        y += 25
+
+        # Lap Times
+        if info and "current_lap_time" in info:
+            cur_time = info["current_lap_time"]
+            last_time = info["last_lap_time"]
+            fast_time = info["fastest_lap_time"]
+            lap_count = info["lap_count"]
+            
+            self.screen.blit(
+                self.font.render(f"Lap Temp:{cur_time:6.2f}s", True, self.HUD_TEXT), (x, y))
+            y += 20
+            
+            last_str = f"{last_time:6.2f}s" if last_time else "  --.--s"
+            self.screen.blit(
+                self.font.render(f"Last Lap:{last_str}", True, (180, 180, 180)), (x, y))
+            y += 20
+            
+            fast_color = (255, 215, 0) if fast_time else (180, 180, 180)
+            fast_str = f"{fast_time:6.2f}s" if fast_time else "  --.--s"
+            self.screen.blit(
+                self.font.render(f"Fastest: {fast_str} (L{lap_count})", True, fast_color), (x, y))
         y += 30
 
         # Status
