@@ -24,7 +24,7 @@ from viz.renderer import Visualizer
 def main():
     parser = argparse.ArgumentParser(description="Run F1 environment with visualization")
     parser.add_argument("--policy", type=str, default="scripted",
-                        choices=["random", "scripted", "noisy", "keyboard"])
+                        choices=["random", "scripted", "noisy", "keyboard", "planner"])
     parser.add_argument("--track", type=str, default=None)
     parser.add_argument("--episodes", type=int, default=5)
     args = parser.parse_args()
@@ -76,6 +76,23 @@ def main():
         needs_car_state = True
     elif args.policy == "keyboard":
         policy = None
+        needs_car_state = False
+    elif args.policy == "planner":
+        import torch
+        from models.world_model import WorldModel
+        from planner.mpc import CEMPlanner
+        
+        device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+        model = WorldModel().to(device)
+        
+        weights_path = "checkpoints/world_model_v1.pth"
+        if os.path.exists(weights_path):
+            model.load_state_dict(torch.load(weights_path, map_location=device))
+            print(f"Loaded trained World Model from {weights_path}")
+        else:
+            print(f"WARNING: No trained model found at {weights_path}. Using random weights!")
+            
+        policy = CEMPlanner(model, num_candidates=400, horizon=25, iterations=4, num_elites=40, device=device)
         needs_car_state = False
 
     print(f"Starting visualization with {args.policy} policy...")

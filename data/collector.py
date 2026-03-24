@@ -5,6 +5,7 @@ import os
 def collect_trajectories(env, policy, num_steps: int,
                          save_dir: str = "data/trajectories",
                          policy_name: str = "default",
+                         track_name: str = "unknown",
                          needs_car_state: bool = False):
     """
     Collect transitions from rollouts.
@@ -54,7 +55,7 @@ def collect_trajectories(env, policy, num_steps: int,
             print(f"  Collected {steps_collected}/{num_steps} steps")
 
     # Save to disk
-    save_path = os.path.join(save_dir, f"{policy_name}_{num_steps}.npz")
+    save_path = os.path.join(save_dir, f"{track_name}_{policy_name}_{num_steps}.npz")
     np.savez_compressed(
         save_path,
         rasters=np.array(rasters),

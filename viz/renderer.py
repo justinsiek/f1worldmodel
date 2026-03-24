@@ -175,12 +175,17 @@ class Visualizer:
         # 2. Dynamic Track
         self._draw_track()
 
-        # 3. Car
+        # 3. Car and Lidar
+        self._draw_lidar_rays(car_state, obs)
         self._draw_car(car_state)
 
         # 4. HUD and Minimap
         self._draw_hud(car_state, action, info)
         self._draw_minimap(car_state)
+
+        # 5. Raster Preview
+        if obs is not None and "raster" in obs:
+            self._draw_raster_preview(obs["raster"])
 
         pygame.display.flip()
         self.clock.tick(60)
@@ -412,6 +417,61 @@ class Visualizer:
         car_pt = np.array([[car_state["x"], car_state["y"]]])
         c_mm = self.get_minimap_coords(car_pt, mm_x - 20, mm_y - 240 + mm_size)[0]
         pygame.draw.circle(self.screen, self.CAR_RED, c_mm, 4)
+
+    def _draw_raster_preview(self, raster):
+        """Draw the 64x64 ego-centric observation as a scaled preview in the bottom left."""
+        preview_size = 180
+        preview_x = 20
+        preview_y = self.height - preview_size - 20 
+
+        # Label
+        self.screen.blit(
+            self.font.render("EGO SENSOR", True, self.HUD_TEXT),
+            (preview_x, preview_y - 25))
+
+        # Convert 3-channel (C, H, W) raster to RGB
+        h, w = raster.shape[1], raster.shape[2]
+        rgb = np.zeros((h, w, 3), dtype=np.uint8)
+
+        # Background (off-track) = dark green, drivable = gray, walls = white, ego = red
+        rgb[:, :, 0] = (raster[0] * 110 + raster[1] * 230 + raster[2] * 220).clip(0, 255).astype(np.uint8)
+        rgb[:, :, 1] = (raster[0] * 110 + raster[1] * 230 + raster[2] * 30).clip(0, 255).astype(np.uint8)
+        rgb[:, :, 2] = (raster[0] * 110 + raster[1] * 230 + raster[2] * 30).clip(0, 255).astype(np.uint8)
+
+        # Pygame uses (W, H, C) surfarray
+        surf = pygame.surfarray.make_surface(rgb.transpose(1, 0, 2))
+        surf = pygame.transform.scale(surf, (preview_size, preview_size))
+
+        pygame.draw.rect(self.screen, (100, 100, 100),
+                         (preview_x - 3, preview_y - 3,
+                          preview_size + 6, preview_size + 6), 3)
+        self.screen.blit(surf, (preview_x, preview_y))
+
+    def _draw_lidar_rays(self, car_state, obs):
+        """Cast mathematical Lidar beams from the car dynamically onto the screen."""
+        if obs is None or "aux" not in obs or len(obs["aux"]) < 16:
+            return
+            
+        x, y, theta = car_state["x"], car_state["y"], car_state["theta"]
+        
+        # Rays are index 1 to 15 in the aux vector (0 is speed)
+        ray_dists = obs["aux"][1:16]
+        max_range = 150.0
+        fov = np.pi
+        
+        angles = np.linspace(-fov/2, fov/2, 15) + theta
+        
+        # Screen origin
+        s_cx, s_cy = self.get_screen_coords(np.array([[x, y]]))[0]
+        
+        # Draw translucent laser lines to the hit point
+        for i, angle in enumerate(angles):
+            dist = ray_dists[i] * max_range
+            end_x = x + dist * np.cos(angle)
+            end_y = y + dist * np.sin(angle)
+            
+            e_x, e_y = self.get_screen_coords(np.array([[end_x, end_y]]))[0]
+            pygame.draw.line(self.screen, (255, 120, 0), (s_cx, s_cy), (e_x, e_y), 1)
 
     def close(self):
         pygame.quit()

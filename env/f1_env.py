@@ -1,6 +1,8 @@
 import numpy as np
 from env.car import Car
 from env.track import Track
+from env.renderer import Renderer
+from env.lidar import Lidar
 
 
 class F1Env:
@@ -19,6 +21,8 @@ class F1Env:
                  lap_bonus: float = 1.0):
         self.track = Track.load(track_csv, pixels_per_meter)
         self.car = Car(max_speed=max_speed, max_steer_rate=max_steer_rate, dt=dt)
+        self.renderer = Renderer(raster_size=raster_size, pixels_per_meter=pixels_per_meter)
+        self.lidar = Lidar(self.track, num_rays=15)
         self.max_steps = max_steps
         self.off_track_tolerance = off_track_tolerance
         self.progress_reward = progress_reward
@@ -79,6 +83,8 @@ class F1Env:
         else:
             steer, throttle, brake = action[0], action[1], action[2]
 
+        old_x, old_y = self.car.x, self.car.y
+
         # Step car
         self.car.step(steer, throttle, brake)
         self.steps += 1
@@ -86,22 +92,30 @@ class F1Env:
         # Check track status
         on_track = self.track.is_on_track(self.car.x, self.car.y)
 
-        # Progress
+        # 1. Global track progress (0 to 1) for Lap Tracking
         progress = self.track.get_progress(self.car.x, self.car.y)
-        progress_delta = progress - self.last_progress
-
-        # Handle lap wraparound
-        if progress_delta < -0.5:
-            progress_delta += 1.0
-        elif progress_delta > 0.5:
-            progress_delta -= 1.0
-
-        # Track halfway for lap detection
-        if progress > 0.5:
+        
+        # Only log halfway marker if actually near the halfway point (prevents start-line reverse wraparound bugs)
+        if 0.4 < progress < 0.6:
             self.crossed_halfway = True
 
+        # 2. Local projected progress for AI Reward (Dot Product vs Centerline)
+        idx = self.track.get_nearest_centerline_idx(old_x, old_y)
+        target_idx = (idx + 3) % self.track.num_points
+        target = self.track.centerline[target_idx]
+        
+        tx = target[0] - old_x
+        ty = target[1] - old_y
+        t_len = np.sqrt(tx**2 + ty**2) + 1e-6
+        tx, ty = tx / t_len, ty / t_len
+        
+        dx = self.car.x - old_x
+        dy = self.car.y - old_y
+        
+        projected_progress = dx * tx + dy * ty
+
         # Reward
-        reward = self.progress_reward * progress_delta * 1000  # scale progress
+        reward = self.progress_reward * projected_progress * 1000  # scale progress
         if not on_track:
             reward -= self.off_track_penalty
             self.off_track_count += 1
@@ -111,7 +125,7 @@ class F1Env:
 
         # Check done conditions
         done = False
-        info = {"progress": progress, "on_track": on_track, "lap_complete": False}
+        info = {"progress": projected_progress, "on_track": on_track, "lap_complete": False}
 
         # Lap complete: crossed halfway and back near start
         if self.crossed_halfway and progress < 0.1 and self.last_progress > 0.9:
@@ -151,8 +165,14 @@ class F1Env:
 
     def _get_obs(self):
         """Get current observation."""
-        aux = np.array([self.car.velocity / self.car.max_speed], dtype=np.float32)
-        return {"aux": aux}
+        raster = self.renderer.render(
+            self.car.x, self.car.y, self.car.theta, self.track
+        )
+        speed_norm = np.array([self.car.velocity / self.car.max_speed], dtype=np.float32)
+        ray_dists = self.lidar.scan(self.car.x, self.car.y, self.car.theta)
+        
+        aux = np.concatenate([speed_norm, ray_dists]).astype(np.float32)
+        return {"raster": raster, "aux": aux}
 
     def get_car_state(self):
         return self.car.get_state()
