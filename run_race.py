@@ -7,8 +7,9 @@ import pygame
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from configs.default import Config
+from configs.default import Config
 from env.f1_env import F1Env
-from data.controllers import RandomPolicy, ScriptedPolicy, NoisyScriptedPolicy
+from data.controllers import RandomPolicy, ScriptedPolicy, NoisyScriptedPolicy, AdvancedScriptedPolicy
 from viz.renderer import Visualizer
 
 class RaceVisualizer(Visualizer):
@@ -121,6 +122,8 @@ def load_policy(name, env):
         
         # Setting horizon down slightly strictly for visualizer frame-rate since it's running 2 entire 400-sequence mental rollouts simultaneously!
         return CEMPlanner(model, num_candidates=400, horizon=25, iterations=4, device=device), False
+    elif name == "advanced":
+        return AdvancedScriptedPolicy(env.track, lookahead=15), True
     elif name == "scripted":
         return ScriptedPolicy(env.track, lookahead=5), True
     elif name == "noisy":
