@@ -12,19 +12,40 @@ from data.controllers import RandomPolicy, ScriptedPolicy, NoisyScriptedPolicy
 from viz.renderer import Visualizer
 
 class RaceVisualizer(Visualizer):
-    def render_race(self, car1_state, car2_state, p1_name, p2_name, info1, info2):
+    def render_race(self, car1_state, car2_state, p1_name, p2_name, info1, info2, done1=False, done2=False):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 return False
 
-        # Center camera on midpoint of both cars
-        mid_x = (car1_state["x"] + car2_state["x"]) / 2.0
-        mid_y = (car1_state["y"] + car2_state["y"]) / 2.0
+        # Dynamic Camera Framing Logic
+        if done1 and not done2:
+            target_x, target_y = car2_state["x"], car2_state["y"]
+            target_scale = 8.0
+        elif done2 and not done1:
+            target_x, target_y = car1_state["x"], car1_state["y"]
+            target_scale = 8.0
+        else:
+            # Both alive (or both dead): Track midpoint
+            target_x = (car1_state["x"] + car2_state["x"]) / 2.0
+            target_y = (car1_state["y"] + car2_state["y"]) / 2.0
+            
+            # Calculate distance spread
+            dx = max(abs(car1_state["x"] - car2_state["x"]), 5.0)
+            dy = max(abs(car1_state["y"] - car2_state["y"]), 5.0)
+            
+            # We want the cars to occupy at most 70% of the screen width/height to leave padding
+            scale_x = (self.view_width * 0.7) / dx
+            scale_y = (self.view_height * 0.7) / dy
+            
+            # Pick the most restrictive scale, bound it between 1.0 (super far) and 8.0 (default close)
+            target_scale = min(max(min(scale_x, scale_y), 1.0), 8.0)
         
-        self.cam_x += (mid_x - self.cam_x) * 0.2
-        self.cam_y += (mid_y - self.cam_y) * 0.2
+        # Smooth follow interpolation
+        self.cam_x += (target_x - self.cam_x) * 0.15
+        self.cam_y += (target_y - self.cam_y) * 0.15
+        self.scale += (target_scale - self.scale) * 0.10
 
         self._draw_background_grid()
         self._draw_track()
@@ -174,7 +195,7 @@ def main():
             a2 = pol2(obs2, car_state=env2.get_car_state()) if c2_needs_state else pol2(obs2)
             obs2, r2, done2, i2 = env2.step(a2)
             
-        if not viz.render_race(env1.get_car_state(), env2.get_car_state(), args.p1, args.p2, i1, i2):
+        if not viz.render_race(env1.get_car_state(), env2.get_car_state(), args.p1, args.p2, i1, i2, done1, done2):
             break
             
         if done1 and done2:

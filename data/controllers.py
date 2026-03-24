@@ -78,6 +78,61 @@ class ScriptedPolicy:
 
         return np.array([steer, throttle, brake], dtype=np.float32)
 
+class AdvancedScriptedPolicy:
+    """
+    Hyper-Aggressive Pure Pursuit Controller.
+    Utilizes 100% throttle on straights, absolutely zero braking, and hyper-aggressive apex steering
+    to serve as the ultimate, stall-proof baseline opponent.
+    """
+    def __init__(self, track, lookahead: int = 15):
+        self.track = track
+        self.lookahead = lookahead
+
+    def __call__(self, obs, car_state=None):
+        if car_state is None:
+            raise ValueError("AdvancedScriptedPolicy requires car_state")
+
+        x, y, theta, velocity = (
+            car_state["x"], car_state["y"],
+            car_state["theta"], car_state["velocity"]
+        )
+
+        idx = self.track.get_nearest_centerline_idx(x, y)
+
+        # Longer dynamic lookahead to initiate high-speed turn-in gracefully
+        speed_factor = max(0.4, velocity / 50.0)
+        dynamic_la = max(8, int(self.lookahead * speed_factor))
+        target_idx = (idx + dynamic_la) % self.track.num_points
+        target = self.track.centerline[target_idx]
+
+        dx = target[0] - x
+        dy = target[1] - y
+        target_angle = np.arctan2(dy, dx)
+
+        angle_error = target_angle - theta
+        angle_error = (angle_error + np.pi) % (2 * np.pi) - np.pi
+
+        # Hyper-aggressive steering gain to instantly snap the car onto the geometric vector
+        steer = np.clip(angle_error * 4.5, -1.0, 1.0)
+
+        future_idx = (idx + dynamic_la * 2) % self.track.num_points
+        future = self.track.centerline[future_idx]
+        fdx = future[0] - target[0]
+        fdy = future[1] - target[1]
+        future_angle = np.arctan2(fdy, fdx)
+        upcoming_curve = abs((future_angle - target_angle + np.pi) % (2 * np.pi) - np.pi)
+
+        curvature = max(abs(angle_error), upcoming_curve)
+
+        # Zero Drag Acceleration logic!
+        if curvature > 0.6:
+            throttle = 0.35  # Lift throttle for hairpins, ZERO BRAKES!
+        elif curvature > 0.25:
+            throttle = 0.70  # Modulate apex
+        else:
+            throttle = 1.00  # 100% Send on Straights
+
+        return np.array([steer, throttle, 0.0], dtype=np.float32)
 
 class NoisyScriptedPolicy:
     """Scripted policy with Gaussian noise for exploration."""
