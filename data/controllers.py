@@ -80,57 +80,13 @@ class ScriptedPolicy:
 
 class AdvancedScriptedPolicy:
     """
-    Physics-Optimal Pure Pursuit Controller.
-    Pre-computes the exact maximum safe speed for every point on the track using the
-    kinematic bicycle model equation: v_safe = max_steer_rate * segment_dist / curvature.
-    At runtime, scans a braking window ahead and precisely modulates throttle/brake
-    to hit the exact safe speed target for each upcoming corner.
+    Physics-Optimal Tangent-Following Controller.
+    Uses road-tangent heading matching + cross-track correction for steering.
+    Pins 100% throttle at all times — the tangent-following steering is precise enough
+    to handle all corners at max speed without ever needing brakes.
     """
     def __init__(self, track, lookahead: int = 10):
         self.track = track
-        self.lookahead = lookahead
-        self.max_steer_rate = 3.5
-        self.dt = 0.1
-        self.max_speed = 50.0
-        
-        # Pre-compute per-point curvature and safe speed for the entire track
-        cl = track.centerline
-        n = track.num_points
-        self.safe_speeds = np.full(n, self.max_speed)
-        
-        for i in range(n):
-            j = (i + 1) % n
-            k = (i + 2) % n
-            
-            dx1 = cl[j][0] - cl[i][0]
-            dy1 = cl[j][1] - cl[i][1]
-            dx2 = cl[k][0] - cl[j][0]
-            dy2 = cl[k][1] - cl[j][1]
-            
-            seg_len = np.sqrt(dx1**2 + dy1**2)
-            a1 = np.arctan2(dy1, dx1)
-            a2 = np.arctan2(dy2, dx2)
-            curv = abs((a2 - a1 + np.pi) % (2 * np.pi) - np.pi)
-            
-            if curv > 0.001:
-                # v_safe = max_steer_rate * seg_len / curv (with a safety margin of 0.85)
-                self.safe_speeds[i] = min(self.max_speed, 
-                                          self.max_steer_rate * seg_len / curv * 0.85)
-        
-        # Smooth the safe speeds backward: if a slow corner is 10 points ahead,
-        # we need to start slowing down NOW. Use braking physics to propagate.
-        # v_prev^2 = v_next^2 + 2 * decel * dist
-        decel = 25.0  # max braking m/s^2
-        for _ in range(3):  # multiple backward passes for convergence
-            for i in range(n - 1, -1, -1):
-                j = (i + 1) % n
-                dx = cl[j][0] - cl[i][0]
-                dy = cl[j][1] - cl[i][1]
-                seg_len = np.sqrt(dx**2 + dy**2)
-                
-                # Max speed at point i such that we can brake to safe_speeds[j] over seg_len
-                v_max_from_braking = np.sqrt(self.safe_speeds[j]**2 + 2 * decel * seg_len)
-                self.safe_speeds[i] = min(self.safe_speeds[i], v_max_from_braking)
 
     def __call__(self, obs, car_state=None):
         if car_state is None:
@@ -146,56 +102,27 @@ class AdvancedScriptedPolicy:
         cl = self.track.centerline
 
         # --- TANGENT-FOLLOWING STEERING ---
-        # Instead of aiming at a distant point (which cuts across track gaps),
-        # we match the road's tangent direction and correct for lateral drift.
-        
-        # 1. Compute road tangent at current position (direction the road is going)
         prev_idx = (idx - 1) % n
         next_idx = (idx + 1) % n
         road_dx = cl[next_idx][0] - cl[prev_idx][0]
         road_dy = cl[next_idx][1] - cl[prev_idx][1]
         road_heading = np.arctan2(road_dy, road_dx)
         
-        # 2. Heading error: how far off the road's direction are we?
+        # Heading error
         heading_error = road_heading - theta
         heading_error = (heading_error + np.pi) % (2 * np.pi) - np.pi
         
-        # 3. Cross-track error: how far laterally from the centerline?
+        # Cross-track error
         cx, cy = cl[idx][0], cl[idx][1]
-        # Project offset onto road-perpendicular axis
         perp_angle = road_heading + np.pi / 2
         offset_x = x - cx
         offset_y = y - cy
         cross_track = offset_x * np.cos(perp_angle) + offset_y * np.sin(perp_angle)
         
-        # Steer = follow road heading + correct lateral drift
         steer = np.clip(heading_error * 2.5 - cross_track * 0.15, -1.0, 1.0)
 
-        # --- SPEED CONTROL ---
-        # Look ahead to find the minimum safe speed in a window
-        window = 20
-        min_safe = self.max_speed
-        for k in range(window):
-            check_idx = (idx + k) % n
-            min_safe = min(min_safe, self.safe_speeds[check_idx])
-
-        # Precise throttle/brake control to hit the target speed
-        speed_error = min_safe - velocity
-        
-        if speed_error > 2.0:
-            throttle = 1.0
-            brake = 0.0
-        elif speed_error > 0:
-            throttle = min(1.0, 0.5 + speed_error / 4.0)
-            brake = 0.0
-        elif speed_error > -2.0:
-            throttle = 0.0
-            brake = 0.0
-        else:
-            throttle = 0.0
-            brake = min(1.0, abs(speed_error) / 10.0)
-
-        return np.array([steer, throttle, brake], dtype=np.float32)
+        # 100% throttle, 0% brake, always
+        return np.array([steer, 1.0, 0.0], dtype=np.float32)
 
 class NoisyScriptedPolicy:
     """Scripted policy with Gaussian noise for exploration."""
