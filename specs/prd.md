@@ -89,10 +89,11 @@ Optional later:
 instability penalty
 control smoothness penalty
 Dataset
-Collect trajectories from
-random policy
-scripted racing-line controller
-noisy scripted controller
+Collect trajectories from 19 geometrically distinct physics profiles to mathematically guarantee robust latent bounds, including:
+- Expert baselines (`scripted`, `noisy`)
+- Extreme kinematics (`kamikaze`, `brakepump`, `donut`)
+- Lateral aerodynamics (`wobble`, `drift`, `panic`)
+- Symmetrical bias correction (`rightbias`, `leftbias`, `sinewave`)
 Store
 transition = {
     "obs": obs_t,
@@ -104,7 +105,7 @@ transition = {
 Model
 Chosen model
 
-Action-conditioned latent world model.
+An Action-Conditional **JEPA** (Joint Embedding Predictive Architecture). The model maps 64x64 sensory pixels into a pure Latent MDP, entirely bypassing physical Autoencoder pixel-reconstruction while organically learning 100% of the aerodynamic and kinematic matrix.
 
 Encoder
 
@@ -180,7 +181,8 @@ longer rollout after stable training
 Planner
 Method
 
-Random-shooting MPC.
+Cross-Entropy Method (CEM) Random-Shooting Latent MPC.
+The planner operates **100% implicitly without heuristic guardrails** (No AEB intercepts, no Lane-Keeping PID loops, no Action Seeding). The robustness of the 19-policy dataset mathematically guarantees the predictive viability of raw sequential action extraction.
 
 At each step
 encode current observation to z_t
@@ -251,11 +253,11 @@ average reward
 latent prediction error vs horizon
 Recommended V1 defaults
 raster_shape = (3, 64, 64)
-aux_dim = 1               # speed
+aux_dim = 16              # speed + 15 Lidar rays
 latent_dim = 64
-planner_candidates = 128
-planner_horizon = 8
-model = "cnn_encoder + mlp_predictor"
+planner_candidates = 400
+planner_horizon = 25
+model = "Action-Conditional JEPA (CNN + MLP)"
 control = "continuous"
 Required modules
 env/ car dynamics, track, raster renderer
