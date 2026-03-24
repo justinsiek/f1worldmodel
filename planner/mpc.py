@@ -9,8 +9,8 @@ class CEMPlanner:
     high-reward driving trajectories in imagination. Uses a receding horizon 
     warm-start to maintain extreme temporal smoothness (no steering jitter).
     """
-    def __init__(self, model, num_candidates: int = 400, horizon: int = 15, 
-                 iterations: int = 4, num_elites: int = 40, device: str = "cpu"):
+    def __init__(self, model, num_candidates: int = 400, horizon: int = 40, 
+                 iterations: int = 4, num_elites: int = 10, device: str = "cpu"):
         self.model = model.to(device)
         self.model.eval()
         self.num_candidates = num_candidates
@@ -20,7 +20,7 @@ class CEMPlanner:
         self.device = device
         
         # Scoring hyperparameters (Uncertainty decoupled)
-        self.progress_reward = 10.0
+        self.progress_reward = 20.0
 
         # Action limits: [steer, throttle, brake]
         self.action_ub = torch.tensor([1.0, 1.0, 1.0], device=device)
@@ -28,7 +28,7 @@ class CEMPlanner:
         
         # Maintain the optimal plan sequence from the previous timestep (Warm Starting)
         self.mu = torch.zeros((self.horizon, 3), device=self.device)
-        self.mu[:, 1] = 0.5 # Warm-start with 50% baseline throttle
+        self.mu[:, 1] = 1.0 # Warm-start with 100% baseline throttle
         
     def __call__(self, obs, car_state=None):
         # 1. Structure raw observation
@@ -41,11 +41,12 @@ class CEMPlanner:
             
             # 3. Receding Horizon: Shift the previous optimal mean plan forward by 1 step
             self.mu[:-1] = self.mu[1:].clone()
-            self.mu[-1] = torch.tensor([0.0, 0.5, 0.0], device=self.device) # reset terminal step to baseline throttle
+            self.mu[-1] = torch.tensor([0.0, 1.0, 0.0], device=self.device) # reset terminal step to full throttle
             
             # Expansive search variance so the solver can discover 100% braking!
             var = torch.ones((self.horizon, 3), device=self.device) * 0.5
-            var[:, 0] = 0.25
+            var[:, 0] = 0.15  # Tighter steering variance to reduce physical twitching
+            var[:, 2] = 0.10  # Tighter brake variance to prevent the solver from randomly guessing brake on straights
             
             # CEM Iteration Loop
             for i in range(self.iterations):
@@ -77,12 +78,12 @@ class CEMPlanner:
                     
                     # Hard prune trajectories that mathematically predict a grass touch.
                     # Restored threshold to 0.5 since the new balanced dataset will cleanly remove statistical pessimism.
-                    death_mask = off_prob > 0.5
+                    death_mask = off_prob > 0.2
                     scores[death_mask] = -1e6
 
-                # Relaxed steering penalty allow the optimizer to naturally carve through corners smoothly
+                # Hyper-Aggressive Steering Penalty forcing the optimizer into buttery-smooth apex lines
                 steer_diffs = torch.abs(actions[:, 1:, 0] - actions[:, :-1, 0])
-                steer_penalty = 1.0 * steer_diffs.sum(dim=1)
+                steer_penalty = 20.0 * steer_diffs.sum(dim=1)
                 scores -= steer_penalty
 
                 # Select Elites
